@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Juego de Comarcas</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        height: 100vh;
+        position: relative;
+        display: flex;
+    }
+    #sidebar {
+        width: 280px;
+        padding: 10px;
+        background: #f9f9f9;
+        border-right: 1px solid #ccc;
+        overflow-y: auto;
+        text-align: center;
+        height: 100%;
+        box-sizing: border-box;
+        position: relative;
+        padding-top: 50px; /* Nuevo: Añade un espacio superior para el botón */
+    }
+    #mapContainer {
+        flex: 1;
+        background: #ddd;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    svg {
+        max-width: 95%;
+        max-height: 95%;
+        border: 1px solid #333;
+        background: #f2f2f2;
+        overflow: visible;
+        display: block;
+    }
+    .comarcaPath {
+        stroke: black;
+        stroke-width: 1;
+        fill: lightgray;
+        cursor: pointer;
+        transition: fill 0.3s;
+    }
+    .correct { fill: green !important; }
+    .wrong { fill: red !important; }
+    #message { font-weight: bold; margin-bottom: 10px; min-height: 24px; }
+    #currentComarca { font-weight: bold; margin-bottom: 5px; }
+
+    .back-to-menu-btn {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        padding: 8px 12px;
+        font-size: 1em;
+        cursor: pointer;
+        background-color: #eee;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        color: #333;
+        text-decoration: none;
+        transition: background-color 0.2s;
+        z-index: 10;
+    }
+    .back-to-menu-btn:hover {
+        background-color: #ddd;
+    }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+    <a href="../index.html" class="back-to-menu-btn">← Volver al Menú Principal</a>
+    <h2>Juego de Comarcas</h2>
+    <p>Selecciona la comarca correcta según se indique.</p>
+    <div id="message"></div>
+    <div id="currentComarca"></div>
+</div>
+
+<div id="mapContainer">
+    <svg id="map" viewBox="0 0 800 800">
+        <g id="mapGroup"></g>
+    </svg>
+</div>
+
+<script>
+let comarcas = [];
+let mapGroup = document.getElementById("mapGroup");
+let currentTarget = null;
+
+const messageDiv = document.getElementById("message");
+const currentComarcaDiv = document.getElementById("currentComarca");
+
+function showMessage(msg, type="info"){
+    messageDiv.textContent = msg;
+    if(type==="correct") messageDiv.style.color="green";
+    else if(type==="wrong") messageDiv.style.color="red";
+    else messageDiv.style.color="black";
+}
+
+async function loadJSONFile(url){
+    try {
+        const timestamp = new Date().getTime();
+        const resp = await fetch(`${url}?t=${timestamp}`);
+        const data = await resp.json();
+        comarcas = (data.comarcas||[]).map(c => ({
+            name: c.name,
+            polygons: c.polygons,
+            status: "pending"
+        }));
+        drawComarcas();
+        nextComarca();
+    } catch(e){
+        showMessage("Error cargando JSON: " + e.message, "wrong");
+    }
+}
+
+function drawComarcas(){
+    mapGroup.innerHTML = "";
+    comarcas.forEach(c => {
+        let d = "";
+        c.polygons.forEach(poly => {
+            if(!poly.points || poly.points.length<3) return;
+            d += "M " + poly.points.map(p=>`${p.x} ${p.y}`).join(" L ") + " Z ";
+        });
+        const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+        path.setAttribute("d", d);
+        path.setAttribute("class", "comarcaPath");
+        if(c.status==="correct") path.classList.add("correct");
+        else if(c.status==="wrong") path.classList.add("wrong");
+
+        path.addEventListener("click", () => selectComarca(c));
+        mapGroup.appendChild(path);
+    });
+}
+
+function selectComarca(c){
+    if(!currentTarget) return;
+    if(c.status==="correct") return;
+
+    if(c.name === currentTarget.name){
+        c.status="correct";
+
+        comarcas.forEach(cc => {
+            if(cc.status==="wrong") cc.status="pending";
+        });
+
+        drawComarcas();
+        showMessage(`¡Correcto! Has seleccionado ${c.name}.`, "correct");
+        setTimeout(nextComarca, 500);
+    } else {
+        c.status="wrong";
+        drawComarcas();
+        showMessage(`Incorrecto. Intenta seleccionar ${currentTarget.name}.`, "wrong");
+    }
+}
+
+function nextComarca(){
+    const pending = comarcas.filter(c => c.status !== "correct");
+    if(pending.length===0){
+        showMessage("¡Felicidades! Has completado todas las comarcas.", "correct");
+        currentTarget = null;
+        currentComarcaDiv.textContent = "";
+        return;
+    }
+    const idx = Math.floor(Math.random()*pending.length);
+    currentTarget = pending[idx];
+    currentComarcaDiv.textContent = `Selecciona: ${currentTarget.name}`;
+    showMessage("Selecciona la comarca correcta.", "info");
+}
+
+loadJSONFile("comarcas.json");
+</script>
+
+</body>
+</html>
