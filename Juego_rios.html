@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Juego de Ríos y Ciudades</title>
+<style>
+  body { display: flex; height: 100vh; margin: 0; font-family: Arial, sans-serif; }
+  #sidebar {
+    width: 250px;
+    background: #f9f9f9;
+    padding: 10px;
+    box-sizing: border-box;
+    border-right: 1px solid #ccc;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  #mapContainer { flex: 1; display: flex; justify-content: center; align-items: center; background: #ddd; }
+  svg { border: 1px solid #333; max-width: 95%; max-height: 95%; background: #f2f2f2; }
+  
+  /* Estilos para comarcas */
+  .comarca {
+    stroke: black;
+    stroke-width: 0.5;
+    stroke-linejoin: round;
+    fill: transparent;
+  }
+  
+  /* Estilos para RÍOS */
+  .river { stroke-width: 2; fill: none; stroke-linecap: round; }
+  .river.correct { stroke: blue; } /* Los ríos correctos serán azules */
+  .river.target { stroke: red; }   /* El río a adivinar será rojo */
+  
+  /* Estilos para puntos y etiquetas de ciudades (igual que el original) */
+  .city-point {
+    pointer-events: none;
+    fill: #333;
+    r: 2;
+  }
+  .city-label {
+    font-size: 8px;
+    font-family: Arial, sans-serif;
+    pointer-events: none;
+    text-anchor: middle;
+    text-shadow:
+      -1px -1px 0 #FFF,
+      1px -1px 0 #FFF,
+      -1px 1px 0 #FFF,
+      1px 1px 0 #FFF;
+  }
+  .city-label.capital {
+    font-weight: bold;
+    font-size: 10px;
+  }
+
+  /* Estilos del juego */
+  .btnRiver { display: block; width: 100%; padding: 6px; margin: 2px 0; border: 1px solid #ccc; background: #fff; cursor: pointer; text-align: left; }
+  .btnRiver:hover { background: #eee; }
+  .btnRiver.correct { background: #9f9; }
+  .btnRiver.wrong { background: #f99; }
+  .target-river-name { font-weight: bold; color: #333; }
+
+  /* Estilos del botón de menú */
+  .back-to-menu-btn {
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: 8px 12px;
+    font-size: 1em;
+    cursor: pointer;
+    background-color: #eee;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    color: #333;
+    text-decoration: none;
+    transition: background-color 0.2s;
+    margin-bottom: 20px;
+  }
+  .back-to-menu-btn:hover {
+    background-color: #ddd;
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <a href="../index.html" class="back-to-menu-btn">← Volver al Menú Principal</a>
+  <h2>Juego de Ríos</h2>
+  <div style="display: flex; align-items: center; margin-bottom: 10px;">
+    <button id="hintButton" style="padding: 6px;">Mostrar Respuesta</button>
+    <span id="hintText" style="margin-left: 10px; font-weight: bold; color: red;"></span>
+  </div>
+  <div id="riverButtons"></div>
+</div>
+
+<div id="mapContainer">
+  <svg viewBox="0 0 800 800">
+    <g id="backgroundLayer">
+      <image href="MRelieve.png" x="0" y="0" width="800" height="800"></image>
+    </g>
+
+    <g id="comarcasLayer"></g>
+    <g id="riversLayer"></g>
+    <g id="cityPointsLayer"></g>
+    <g id="citiesLayer"></g>
+  </svg>
+</div>
+
+<script>
+  // Variables de datos
+  let comarcas = [];
+  let rios = [];
+  let originalCiudades = [];
+  let ciudadesConCajas = [];
+  
+  // Variables de juego
+  let answeredCorrectPermanent = new Set();
+  let correctlyAnsweredInSession = new Set();
+  let targetRiver = null;
+  
+  // VARIABLE DE CORRECCIÓN HORIZONTAL (DESFASE)
+  // AJUSTA ESTE VALOR:
+  // - Positivo: Mueve el río a la derecha (si está muy a la izquierda)
+  // - Negativo: Mueve el río a la izquierda (si está muy a la derecha)
+  const X_OFFSET = -100; 
+  
+  // Referencias DOM
+  const comarcasLayer = document.getElementById('comarcasLayer');
+  const riversLayer = document.getElementById('riversLayer');
+  const cityPointsLayer = document.getElementById('cityPointsLayer');
+  const citiesLayer = document.getElementById('citiesLayer');
+  const riverButtonsDiv = document.getElementById('riverButtons');
+  const hintButton = document.getElementById('hintButton');
+  const hintText = document.getElementById('hintText');
+  
+  async function loadData() {
+    try {
+      const timestamp = new Date().getTime();
+      const comarcasResponse = await fetch(`comarcas.json?t=${timestamp}`);
+      comarcas = await comarcasResponse.json();
+      
+      const riosResponse = await fetch(`rios.json?t=${timestamp}`); 
+      rios = await riosResponse.json(); 
+      
+      const ciudadesResponse = await fetch(`ciudades.json?t=${timestamp}`);
+      originalCiudades = await ciudadesResponse.json();
+      const cajasResponse = await fetch(`nuevas_posiciones_ciudades_cajas.json?t=${timestamp}`);
+      ciudadesConCajas = await cajasResponse.json();
+
+      initializeGame();
+    } catch (error) {
+      console.error('Error al cargar los datos:', error);
+    }
+  }
+
+  function drawMap() {
+    // Dibujo de comarcas (Sin cambios)
+    comarcasLayer.innerHTML = "";
+    if (comarcas && comarcas.comarcas) {
+      comarcas.comarcas.forEach(comarca => {
+        comarca.polygons.forEach(polygon => {
+          const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+          const pointsStr = polygon.points.map(p => `${p.x},${p.y}`).join(" ");
+          poly.setAttribute("points", pointsStr);
+          poly.setAttribute("class", "comarca");
+          comarcasLayer.appendChild(poly);
+        });
+      });
+    }
+
+    // Dibujo de ciudades (Sin cambios)
+    cityPointsLayer.innerHTML = "";
+    citiesLayer.innerHTML = "";
+    
+    if (originalCiudades && originalCiudades.ciudades && ciudadesConCajas && ciudadesConCajas.ciudades) {
+      ciudadesConCajas.ciudades.forEach(ciudadConCaja => {
+        const ciudadOriginal = originalCiudades.ciudades.find(c => c.nombre === ciudadConCaja.nombre);
+        
+        if (ciudadOriginal) {
+            const cityPoint = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            cityPoint.setAttribute("cx", ciudadOriginal.x);
+            cityPoint.setAttribute("cy", ciudadOriginal.y);
+            cityPoint.setAttribute("class", "city-point");
+            cityPointsLayer.appendChild(cityPoint);
+        }
+
+        const cityGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        cityGroup.setAttribute("class", "city-box-group");
+        // Nota: Si las cajas de texto también están desfasadas, deberás aplicar X_OFFSET a ciudadConCaja.x aquí.
+        cityGroup.setAttribute("transform", `translate(${ciudadConCaja.x}, ${ciudadConCaja.y})`); 
+        
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("class", "city-label " + (ciudadConCaja.tipo === 'capital' ? 'capital' : ''));
+        cityGroup.appendChild(text);
+
+        citiesLayer.appendChild(cityGroup);
+        
+        if (ciudadConCaja.lines && ciudadConCaja.lineYOffsets) {
+            drawLinesInRect(text, ciudadConCaja.lines, ciudadConCaja.lineYOffsets, ciudadConCaja.width);
+        } else {
+            wrapTextInRect(text, ciudadConCaja.nombre, ciudadConCaja.width);
+        }
+      });
+    }
+  }
+  
+  // Funciones auxiliares para texto (Sin cambios)
+  function drawLinesInRect(text, lines, lineYOffsets, width) {
+    while (text.firstChild) {
+        text.removeChild(text.firstChild);
+    }
+    const xPos = width / 2;
+    lines.forEach((lineText, index) => {
+        const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+        tspan.setAttribute("x", xPos);
+        tspan.setAttribute("y", lineYOffsets[index]);
+        tspan.textContent = lineText;
+        text.appendChild(tspan);
+    });
+  }
+
+  function wrapTextInRect(text, fullText, maxWidth) {
+    while (text.firstChild) { text.removeChild(text.firstChild); }
+    const words = fullText.split(" ");
+    let line = "";
+    const padding = 10;
+    const fontSize = parseFloat(window.getComputedStyle(text).fontSize);
+    const lineHeight = fontSize * 1.2;
+    const xPos = maxWidth / 2;
+    let tspans = [];
+    const tempTspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+    text.appendChild(tempTspan);
+    for (let i = 0; i < words.length; i++) {
+        const testLine = line + (line ? ' ' : '') + words[i];
+        tempTspan.textContent = testLine;
+        if (tempTspan.getComputedTextLength() > maxWidth - padding) {
+            if (line === "") {
+                tspans.push(words[i]);
+            } else {
+                tspans.push(line);
+                line = words[i];
+            }
+        } else {
+            line = testLine;
+        }
+    }
+    tspans.push(line);
+    text.removeChild(tempTspan);
+    
+    const totalTextHeight = tspans.length * lineHeight;
+    const rectHeight = 20;
+    const initialY = (rectHeight / 2) - (totalTextHeight / 2) + (lineHeight / 2) * 0.9;
+    
+    tspans.forEach((tspanText, index) => {
+      const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+      tspan.setAttribute("x", xPos);
+      tspan.setAttribute("y", initialY + (index * lineHeight));
+      tspan.textContent = tspanText;
+      text.appendChild(tspan);
+    });
+  }
+  
+  // Funciones de juego (Sin cambios funcionales, solo renombramiento)
+  function initializeGame() {
+    drawMap();
+    targetRiver = getRandomRiver();
+    updateButtons();
+    drawRiver(targetRiver, 'target');
+    hintButton.onclick = giveHint;
+  }
+
+  function getRandomRiver() {
+    if (!rios.rios) return null; 
+    const unans = rios.rios.filter(r => !answeredCorrectPermanent.has(r.nombre));
+    if (unans.length === 0) {
+      showEndGameOptions();
+      return null;
+    }
+    const randomIndex = Math.floor(Math.random() * unans.length);
+    return unans[randomIndex];
+  }
+
+  function showEndGameOptions() {
+    riverButtonsDiv.innerHTML = '';
+    const congratsMsg = document.createElement('p');
+    congratsMsg.textContent = "¡Felicidades, has acertado todos los ríos!";
+    congratsMsg.style.fontWeight = 'bold';
+    riverButtonsDiv.appendChild(congratsMsg);
+    
+    const restartBtn = document.createElement('button');
+    restartBtn.textContent = "Reiniciar";
+    restartBtn.className = 'btnRiver';
+    restartBtn.style.marginTop = '10px';
+    restartBtn.onclick = () => restartGame(false);
+    riverButtonsDiv.appendChild(restartBtn);
+    
+    const reviewBtn = document.createElement('button');
+    reviewBtn.textContent = "Repasar";
+    reviewBtn.className = 'btnRiver';
+    reviewBtn.onclick = () => restartGame(true);
+    riverButtonsDiv.appendChild(reviewBtn);
+  }
+  
+  function restartGame(reviewMode) {
+    if (reviewMode) {
+        answeredCorrectPermanent = new Set(correctlyAnsweredInSession);
+    } else {
+        answeredCorrectPermanent.clear();
+    }
+    correctlyAnsweredInSession.clear();
+    riverButtonsDiv.innerHTML = '';
+    riversLayer.innerHTML = '';
+    hintText.textContent = '';
+    initializeGame();
+  }
+
+  function updateButtons() {
+    riverButtonsDiv.innerHTML = '';
+    if (!rios.rios) return;
+    const allRivers = rios.rios.slice();
+    allRivers.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    
+    allRivers.forEach(river => {
+      const button = document.createElement('button');
+      button.className = 'btnRiver';
+      button.textContent = river.nombre;
+      button.onclick = () => checkAnswer(river, button);
+      if (answeredCorrectPermanent.has(river.nombre)) {
+        button.classList.add('correct');
+      }
+      riverButtonsDiv.appendChild(button);
+    });
+    hintText.textContent = '';
+  }
+
+  function giveHint() {
+    if (!targetRiver) return;
+    hintText.textContent = targetRiver.nombre;
+    drawRiver(targetRiver, 'correct');
+    answeredCorrectPermanent.add(targetRiver.nombre);
+    
+    setTimeout(() => {
+        targetRiver = getRandomRiver();
+        if (targetRiver) {
+          updateButtons();
+          drawRiver(targetRiver, 'target');
+        }
+    }, 1500);
+  }
+  
+  // 🚀 FUNCIÓN CRÍTICA CON EL OFFSET APLICADO 🚀
+  function drawRiver(river, cssClass) {
+    riversLayer.innerHTML = "";
+    if (!rios.rios) return;
+
+    // Función auxiliar para aplicar el offset a cada par de coordenadas [x, y]
+    const applyOffset = (p) => {
+      // p[0] es la coordenada X, p[1] es la coordenada Y
+      // Sumamos X_OFFSET (el valor que definimos) a la coordenada X
+      return `${p[0] + X_OFFSET},${p[1]}`; 
+    };
+
+    // Función para crear la polilínea con el offset aplicado
+    const createPolyline = (seg, className) => {
+        const poly = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+        // Convertimos los puntos, APLICANDO EL OFFSET, y los unimos en un string
+        const pointsStr = seg.puntos.map(applyOffset).join(" ");
+        poly.setAttribute("points", pointsStr);
+        poly.setAttribute("class", `river ${className}`);
+        return poly;
+    };
+
+
+    // 1. Redibujar todos los ríos ya acertados en azul
+    rios.rios.forEach(r => {
+      if (answeredCorrectPermanent.has(r.nombre)){
+        r.segmentos.forEach(seg => {
+          const poly = createPolyline(seg, 'correct');
+          riversLayer.appendChild(poly);
+        });
+      }
+    });
+
+    // 2. Dibujar el río objetivo (o el que se acaba de acertar)
+    if (river && !answeredCorrectPermanent.has(river.nombre)){
+      river.segmentos.forEach(seg=>{
+        const poly = createPolyline(seg, cssClass);
+        riversLayer.appendChild(poly);
+      });
+    }
+  }
+
+  function checkAnswer(river, button) {
+    if (!targetRiver) return;
+    if (river.nombre === targetRiver.nombre) {
+      button.classList.remove("wrong");
+      button.classList.add("correct");
+      answeredCorrectPermanent.add(river.nombre);
+      correctlyAnsweredInSession.add(river.nombre);
+      drawRiver(targetRiver, 'correct');
+      setTimeout(() => {
+        targetRiver = getRandomRiver();
+        if (targetRiver) {
+          updateButtons();
+          drawRiver(targetRiver, 'target');
+        }
+      }, 1000);
+    } else {
+      button.classList.add("wrong");
+    }
+  }
+
+  loadData();
+</script>
+</body>
+</html>
