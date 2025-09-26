@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Juego de Ríos y Ciudades - Identificación por Clic</title>
+<title>Juego de Ríos - Selección por Punto (Intenso)</title>
 <style>
     body { display: flex; height: 100vh; margin: 0; font-family: Arial, sans-serif}
     #sidebar {
@@ -26,88 +26,41 @@
         fill: transparent;
     }
     
-    /* === NUEVOS ESTILOS PARA RÍOS INTERACTIVOS === */
+    /* === ESTILOS PARA RÍOS (FIJOS) - COLOR INTENSO === */
     .river { 
         stroke-width: 2; 
         fill: none; 
         stroke-linecap: round; 
+        stroke: #3399ff; /* Azul más saturado e intenso */
         cursor: default;
-        transition: stroke 0.3s, stroke-width 0.3s;
     }
 
-    /* Ríos que son target y aún no han sido acertados */
-    .river.initial { 
-        stroke: #666; /* Gris oscuro para ser visible pero neutro */
-    }
-    .river.initial[data-river-name]:hover {
-        stroke: #333; /* Más oscuro al pasar el ratón para indicar clic */
-        stroke-width: 3;
+    /* === ESTILOS PARA PUNTOS INTERACTIVOS === */
+    .river-target-point {
+        fill: #999; /* Gris: el color inicial para seleccionar */
+        r: 6;      /* Radio grande para fácil clic en móvil */
+        stroke: #333;
+        stroke-width: 0.5;
         cursor: pointer;
+        transition: fill 0.2s, stroke 0.2s;
     }
     
-    /* Ríos ya acertados (Azules) */
-    .river.correct { 
-        stroke: blue;
-        stroke-width: 2.5;
-        cursor: default !important;
-    } 
+    .river-target-point:hover {
+        fill: #666; /* Un poco más oscuro al pasar el ratón */
+    }
     
-    /* Respuesta incorrecta (Resaltado breve) */
-    .river.wrong { 
-        stroke: #ff3333; /* Rojo para error */
-        stroke-width: 4;
+    .river-target-point.correct {
+        fill: #32cd32; /* Verde: Correcto */
+        stroke: #1e7e34;
+        cursor: default;
     }
-
-    /* Pista (Resaltado del objetivo) */
-    .river.target-highlight { 
-        stroke: red; 
-        stroke-width: 3.5;
-    }
-
-    /* Estilos para puntos y etiquetas de ciudades (Mantenidos) */
-    .city-point {
-        pointer-events: none;
-        fill: #333;
-        r: 2;
-    }
-    .city-label {
-        font-size: 8px;
-        font-family: Arial, sans-serif;
-        pointer-events: none;
-        text-anchor: middle;
-        text-shadow:
-            -1px -1px 0 #FFF,
-            1px -1px 0 #FFF,
-            -1px 1px 0 #FFF,
-            1px 1px 0 #FFF;
-    }
-    .city-label.capital {
-        font-weight: bold;
-        font-size: 10px;
-    }
-
-    /* === ESTILOS DEL JUEGO === */
-    /* El botón de hint se mantiene */
-    .btnRiver { display: block; width: 100%; padding: 6px; margin: 2px 0; border: 1px solid #ccc; background: #fff; cursor: pointer; text-align: left; }
     
-    /* Nuevo estilo para el nombre objetivo */
-    .target-river-name { 
-        font-weight: bold; 
-        color: #333; 
-        font-size: 1.2em; 
-        background-color: #e6f7ff; 
-        padding: 10px; 
-        border-radius: 5px; 
-        text-align: center;
-        margin-top: 10px;
-        margin-bottom: 20px;
-    }
-    #riverButtons button {
-        /* Ocultar botones de nombre, ya que ya no se usan */
-        display: none !important;
+    .river-target-point.wrong {
+        fill: #dc3545; /* Rojo: Incorrecto */
+        stroke: #bd2130;
     }
 
-    /* Estilos del botón de menú */
+    /* Estilos del juego */
     .back-to-menu-btn {
         display: block;
         width: 100%;
@@ -127,15 +80,29 @@
         background-color: #ddd;
     }
     
+    .target-river-name { 
+        font-weight: bold; 
+        color: #333; 
+        font-size: 1.2em; 
+        background-color: #e6f7ff; 
+        padding: 10px; 
+        border-radius: 5px; 
+        text-align: center;
+        margin-top: 10px;
+        margin-bottom: 20px;
+    }
+    #riverButtons button {
+        display: none !important;
+    }
 </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <a href="../index.html" class="back-to-menu-btn">← Volver al Menú Principal</a>
+    <a href="index.html" class="back-to-menu-btn">← Volver al Menú Principal</a>
     <h2>Juego de Ríos</h2>
     <div style="display: flex; align-items: center; margin-bottom: 10px;">
-        <button id="hintButton" style="padding: 6px;">Mostrar Respuesta</button>
+        <button id="hintButton" style="padding: 6px;">Mostrar Pista</button> 
         <span id="hintText" style="margin-left: 10px; font-weight: bold; color: red;"></span>
     </div>
     
@@ -150,8 +117,7 @@
 
         <g id="comarcasLayer"></g>
         <g id="riversLayer"></g> 
-        <g id="cityPointsLayer"></g>
-        <g id="citiesLayer"></g>
+        <g id="riverPointsLayer"></g> 
     </svg>
 </div>
 
@@ -159,6 +125,7 @@
     // Variables de datos
     let comarcas = [];
     let rios = [];
+    // Las variables de ciudades no se usan, pero se mantienen por si la carga de datos es un script único
     let originalCiudades = [];
     let ciudadesConCajas = [];
     
@@ -166,15 +133,14 @@
     let answeredCorrectPermanent = new Set();
     let correctlyAnsweredInSession = new Set();
     let targetRiver = null;
+    let riverPointsMap = new Map(); 
     
-    // VARIABLE DE CORRECCIÓN HORIZONTAL (DESFASE)
-    const X_OFFSET = -100; // Asumo el valor original para el mapa
+    const X_OFFSET = -100;
     
     // Referencias DOM
     const comarcasLayer = document.getElementById('comarcasLayer');
     const riversLayer = document.getElementById('riversLayer');
-    const cityPointsLayer = document.getElementById('cityPointsLayer');
-    const citiesLayer = document.getElementById('citiesLayer');
+    const riverPointsLayer = document.getElementById('riverPointsLayer'); 
     const riverButtonsDiv = document.getElementById('riverButtons');
     const hintButton = document.getElementById('hintButton');
     const hintText = document.getElementById('hintText');
@@ -192,27 +158,23 @@
             rios = [];
             if (dataRios.rios) {
                 dataRios.rios.forEach(r => {
-                    rios.push(r); // río principal
+                    rios.push(r); 
                     if (r.afluentes) {
-                        r.afluentes.forEach(a => rios.push(a)); // agregar afluentes
+                        r.afluentes.forEach(a => rios.push(a)); 
                     }
                 });
             }
-
-            const ciudadesResponse = await fetch(`ciudades.json?t=${timestamp}`);
-            originalCiudades = await ciudadesResponse.json();
-            const cajasResponse = await fetch(`nuevas_posiciones_ciudades_cajas.json?t=${timestamp}`);
-            ciudadesConCajas = await cajasResponse.json();
-
+            
+            // La carga de ciudades es ignorada.
+            
             initializeGame();
         } catch (error) {
             console.error('Error al cargar los datos:', error);
+            if (rios.length > 0) initializeGame(); 
         }
     }
 
-    // Mantenemos drawMap para las comarcas y ciudades
     function drawMap() {
-        // Dibujo de comarcas (Sin cambios)
         comarcasLayer.innerHTML = "";
         if (comarcas && comarcas.comarcas) {
             comarcas.comarcas.forEach(comarca => {
@@ -225,114 +187,98 @@
                 });
             });
         }
-
-        // Dibujo de ciudades (Sin cambios)
-        cityPointsLayer.innerHTML = "";
-        citiesLayer.innerHTML = "";
-        
-        if (originalCiudades && originalCiudades.ciudades && ciudadesConCajas && ciudadesConCajas.ciudades) {
-            ciudadesConCajas.ciudades.forEach(ciudadConCaja => {
-                const ciudadOriginal = originalCiudades.ciudades.find(c => c.nombre === ciudadConCaja.nombre);
-                
-                if (ciudadOriginal) {
-                    // Nota: Los puntos de las ciudades originales también deben ser desfasados para alinearse
-                    const cityPoint = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-                    cityPoint.setAttribute("cx", ciudadOriginal.x + X_OFFSET); 
-                    cityPoint.setAttribute("cy", ciudadOriginal.y);
-                    cityPoint.setAttribute("class", "city-point");
-                    cityPointsLayer.appendChild(cityPoint);
-                }
-
-                const cityGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
-                cityGroup.setAttribute("class", "city-box-group");
-                // Nota: Aplicamos X_OFFSET a la posición de la caja de texto
-                cityGroup.setAttribute("transform", `translate(${ciudadConCaja.x + X_OFFSET}, ${ciudadConCaja.y})`); 
-                
-                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                text.setAttribute("class", "city-label " + (ciudadConCaja.tipo === 'capital' ? 'capital' : ''));
-                cityGroup.appendChild(text);
-
-                citiesLayer.appendChild(cityGroup);
-                
-                if (ciudadConCaja.lines && ciudadConCaja.lineYOffsets) {
-                    drawLinesInRect(text, ciudadConCaja.lines, ciudadConCaja.lineYOffsets, ciudadConCaja.width);
-                } else {
-                    wrapTextInRect(text, ciudadConCaja.nombre, ciudadConCaja.width);
-                }
-            });
-        }
+        // No se dibuja nada de ciudades
     }
-    
-    // Funciones auxiliares para texto (Sin cambios)
-    function drawLinesInRect(text, lines, lineYOffsets, width) {
-        // ... (código sin cambios)
-        while (text.firstChild) {
-            text.removeChild(text.firstChild);
-        }
-        const xPos = width / 2;
-        lines.forEach((lineText, index) => {
-            const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
-            tspan.setAttribute("x", xPos);
-            tspan.setAttribute("y", lineYOffsets[index]);
-            tspan.textContent = lineText;
-            text.appendChild(tspan);
-        });
-    }
-
-    function wrapTextInRect(text, fullText, maxWidth) {
-        // ... (código sin cambios)
-        while (text.firstChild) { text.removeChild(text.firstChild); }
-        const words = fullText.split(" ");
-        let line = "";
-        const padding = 10;
-        const fontSize = parseFloat(window.getComputedStyle(text).fontSize);
-        const lineHeight = fontSize * 1.2;
-        const xPos = maxWidth / 2;
-        let tspans = [];
-        const tempTspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
-        text.appendChild(tempTspan);
-        for (let i = 0; i < words.length; i++) {
-            const testLine = line + (line ? ' ' : '') + words[i];
-            tempTspan.textContent = testLine;
-            if (tempTspan.getComputedTextLength() > maxWidth - padding) {
-                if (line === "") {
-                    tspans.push(words[i]);
-                } else {
-                    tspans.push(line);
-                    line = words[i];
-                }
-            } else {
-                line = testLine;
-            }
-        }
-        tspans.push(line);
-        text.removeChild(tempTspan);
-        
-        const totalTextHeight = tspans.length * lineHeight;
-        const rectHeight = 20;
-        const initialY = (rectHeight / 2) - (totalTextHeight / 2) + (lineHeight / 2) * 0.9;
-        
-        tspans.forEach((tspanText, index) => {
-            const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
-            tspan.setAttribute("x", xPos);
-            tspan.setAttribute("y", initialY + (index * lineHeight));
-            tspan.textContent = tspanText;
-            text.appendChild(tspan);
-        });
-    }
-    
-    // === FUNCIONES DE JUEGO ADAPTADAS ===
     
     function initializeGame() {
         drawMap();
+        drawRiverLines(); 
+        
         targetRiver = getRandomRiver();
         if (targetRiver) {
-            drawAllRivers('initial'); // Dibujar todos los ríos seleccionables
-            updateTargetDisplay(); // Mostrar el nombre objetivo
+            drawRiverPoints(); 
+            updateTargetDisplay();
         }
         hintButton.onclick = giveHint;
     }
 
+    function drawRiverLines() {
+        riversLayer.innerHTML = "";
+        if (!rios) return;
+        const applyOffset = (p) => `${p[0] + X_OFFSET},${p[1]}`;
+        
+        rios.forEach(river => {
+            river.segmentos.forEach(seg => {
+                const poly = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+                const pointsStr = seg.puntos.map(applyOffset).join(" ");
+                poly.setAttribute("points", pointsStr);
+                poly.setAttribute("class", 'river'); 
+                riversLayer.appendChild(poly);
+            });
+        });
+    }
+
+    function drawRiverPoints() {
+        riverPointsLayer.innerHTML = "";
+        riverPointsMap.clear(); 
+        if (!rios) return;
+
+        rios.forEach(river => {
+            // Usaremos el punto medio del primer segmento
+            const firstSegmentPoints = river.segmentos[0].puntos;
+            const p = firstSegmentPoints[Math.floor(firstSegmentPoints.length / 2)];
+            
+            const cx = p[0] + X_OFFSET;
+            const cy = p[1];
+
+            const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            point.setAttribute("cx", cx);
+            point.setAttribute("cy", cy);
+            point.dataset.riverName = river.nombre;
+            point.setAttribute("class", 'river-target-point');
+            
+            if (answeredCorrectPermanent.has(river.nombre)) {
+                point.classList.add('correct');
+                point.onclick = null;
+            } else {
+                point.onclick = (event) => checkAnswer(event.target.dataset.riverName, event.target);
+            }
+            
+            riverPointsMap.set(river.nombre, point);
+            riverPointsLayer.appendChild(point);
+        });
+    }
+
+    function checkAnswer(clickedRiverName, clickedPoint) {
+        if (!targetRiver) return;
+        
+        if (clickedRiverName === targetRiver.nombre) {
+            
+            clickedPoint.classList.add('correct');
+            clickedPoint.classList.remove('wrong');
+            clickedPoint.onclick = null; 
+            
+            answeredCorrectPermanent.add(targetRiver.nombre);
+            correctlyAnsweredInSession.add(targetRiver.nombre);
+
+            riverPointsMap.forEach((point) => {
+                if (point.classList.contains('wrong')) {
+                    point.classList.remove('wrong');
+                }
+            });
+
+            setTimeout(() => {
+                targetRiver = getRandomRiver();
+                if (targetRiver) {
+                    updateTargetDisplay();
+                    drawRiverPoints();
+                }
+            }, 1000);
+        } else {
+            clickedPoint.classList.add('wrong');
+        }
+    }
+    
     function getRandomRiver() {
         if (!rios) return null; 
         const unans = rios.filter(r => !answeredCorrectPermanent.has(r.nombre));
@@ -373,18 +319,17 @@
         }
         correctlyAnsweredInSession.clear();
         riverButtonsDiv.innerHTML = '';
-        riversLayer.innerHTML = '';
+        riverPointsLayer.innerHTML = '';
         hintText.textContent = '';
         initializeGame();
     }
-
-    // Muestra el nombre del río a buscar y el progreso
+    
     function updateTargetDisplay() {
         riverButtonsDiv.innerHTML = '';
         if (!targetRiver) return;
 
         const instruction = document.createElement('p');
-        instruction.textContent = "Haz clic en el río:";
+        instruction.textContent = "Haz clic en el punto del río:";
         riverButtonsDiv.appendChild(instruction);
 
         const targetName = document.createElement('p');
@@ -406,94 +351,23 @@
         
         hintText.textContent = targetRiver.nombre.toUpperCase();
         
-        // Redibuja todos los ríos, resaltando el objetivo en rojo
-        drawAllRivers('target-highlight'); 
-        
-        // Se añade como acertado para pasar al siguiente
+        const targetPoint = riverPointsMap.get(targetRiver.nombre);
+        if (targetPoint) {
+             targetPoint.classList.add('correct');
+             targetPoint.onclick = null; 
+        }
+
         answeredCorrectPermanent.add(targetRiver.nombre);
 
-        // Espera y pasa al siguiente
         setTimeout(() => {
             targetRiver = getRandomRiver();
             if (targetRiver) {
                 updateTargetDisplay();
-                drawAllRivers('initial'); // Dibuja el nuevo set de ríos
+                drawRiverPoints(); 
             }
         }, 1500);
     }
-    
-    // 🚀 FUNCIÓN CRÍTICA: Dibuja todos los ríos y asigna interactividad 🚀
-    function drawAllRivers(mode) {
-        riversLayer.innerHTML = "";
-        if (!rios) return;
 
-        const applyOffset = (p) => {
-          // Aplicamos X_OFFSET a la X
-          return `${p[0] + X_OFFSET},${p[1]}`; 
-        };
-
-        rios.forEach(river => {
-            const isCorrect = answeredCorrectPermanent.has(river.nombre);
-            
-            let cssClass = '';
-            let isInteractive = false;
-            
-            if (isCorrect) {
-                cssClass = 'correct'; // Ya acertados: Azules
-            } else if (mode === 'target-highlight' && river.nombre === targetRiver.nombre) {
-                cssClass = 'target-highlight'; // Highlight por pista: Rojo
-            } else if (mode === 'initial' || mode === 'correct') { 
-                // Ríos que el jugador debe adivinar: Grises y clicables
-                cssClass = 'initial';
-                isInteractive = true;
-            }
-
-            river.segmentos.forEach(seg => {
-                const poly = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-                const pointsStr = seg.puntos.map(applyOffset).join(" ");
-                
-                poly.setAttribute("points", pointsStr);
-                poly.setAttribute("class", `river ${cssClass}`);
-                
-                // **Hacer clicable y guardar el nombre en el elemento**
-                if (isInteractive) {
-                    poly.dataset.riverName = river.nombre; // Guardar el nombre
-                    poly.onclick = (event) => checkAnswer(event.target.dataset.riverName, event.target);
-                    poly.style.cursor = 'pointer'; 
-                }
-                
-                riversLayer.appendChild(poly);
-            });
-        });
-    }
-
-    function checkAnswer(clickedRiverName, clickedPolyline) {
-        if (!targetRiver) return;
-        
-        if (clickedRiverName === targetRiver.nombre) {
-            
-            // Correcto: Marcar y pasar al siguiente
-            answeredCorrectPermanent.add(targetRiver.nombre);
-            correctlyAnsweredInSession.add(targetRiver.nombre);
-
-            // Redibujar para que el río acertado se ponga azul (clase 'correct')
-            drawAllRivers('correct'); 
-            
-            setTimeout(() => {
-                targetRiver = getRandomRiver();
-                if (targetRiver) {
-                    updateTargetDisplay(); // Mostrar el nuevo nombre objetivo
-                    drawAllRivers('initial'); // Dibujar todos los no acertados en gris
-                }
-            }, 1000);
-        } else {
-            // Incorrecto: Resaltar brevemente el trazado clicado
-            clickedPolyline.classList.add('wrong');
-            setTimeout(() => {
-                clickedPolyline.classList.remove('wrong');
-            }, 500);
-        }
-    }
 
     loadData();
 </script>
