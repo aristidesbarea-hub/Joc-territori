@@ -79,6 +79,38 @@
   .back-to-menu-btn:hover {
     background-color: #ddd;
   }
+
+ /* Media Query para dispositivos móviles (Max-width: 768px) */
+  @media (max-width: 768px) {
+    /* 1. Cambiar el layout de la pantalla de PC (sidebar + mapa) al de móvil (apilado) */
+    body {
+      flex-direction: column; /* Apila los elementos verticalmente: Sidebar arriba, Mapa abajo */
+      height: auto; /* Permite que el contenido se desplace */
+    }
+
+    /* 2. Ajustar el tamaño del mapa y el contenedor de mapa */
+    #mapContainer {
+      width: 100%; /* El mapa ocupa todo el ancho */
+      height: 70vh; /* Establece una altura fija, por ejemplo el 70% del viewport */
+      align-items: flex-start; /* Asegura que el mapa se pegue a la parte superior de su contenedor */
+      margin-bottom: 20px; /* Espacio extra debajo del mapa antes de que termine el contenido */
+    }
+
+    /* 3. Ajustar la barra lateral (sidebar) para móvil */
+    #sidebar {
+      width: 100%; /* Ocupa todo el ancho */
+      order: 1; /* Asegura que el sidebar aparezca primero si el mapa va a ser el focus */
+      padding-top: 5px;
+      padding-bottom: 5px;
+      border-right: none; /* Elimina la línea de borde vertical */
+      border-bottom: 1px solid #ccc; /* Añade una línea de borde inferior */
+    }
+
+    /* Opcional: Ajustar el tamaño del texto para que sea más legible en móvil */
+    #sidebar h2, .btnRiver {
+        font-size: 1.1em;
+    }
+  }
 </style>
 </head>
 <body>
@@ -426,3 +458,4 @@
 </script>
 </body>
 </html>
+
