@@ -15,9 +15,10 @@
         display: flex;
         flex-direction: column;
     }
-    #mapContainer { flex: 1; display: flex; justify-content: center; align-items: flex-start; background: #ddd; }
+    #mapContainer { flex: 1; display: flex; justify-content: center; align-items: flex-start; background: #ddd; position: relative; }
     svg { border: 1px solid #333; max-width: 95%; max-height: 95%; background: #f2f2f2; }
 
+    /* Estilos para comarcas */
     .comarca {
         stroke: black;
         stroke-width: 0.5;
@@ -25,20 +26,25 @@
         fill: transparent;
     }
 
+    /* Estilos ríos */
     .river { 
         stroke-width: 2; 
         fill: none; 
         stroke-linecap: round; 
-        stroke: #3399ff;
+        stroke: #3399ff; 
         cursor: default;
         transition: stroke 0.3s;
     }
-
     .river.hint-active {
-        stroke: #4CAF50; 
+        stroke: #ffc107;
         stroke-width: 3.5;
     }
+    .river.correct-river {
+        stroke: #0066ff;
+        stroke-width: 3;
+    }
 
+    /* Puntos interactivos */
     .river-target-point {
         fill: #999;
         r: 6;
@@ -47,26 +53,19 @@
         cursor: pointer;
         transition: fill 0.2s, stroke 0.2s;
     }
-
     .river-target-point:hover { fill: #666; }
-
-    .river-target-point.correct {
-        fill: #32cd32;
-        stroke: #1e7e34;
-        cursor: default;
+    .river-target-point.correct { fill: #32cd32; stroke: #1e7e34; cursor: default; }
+    .river-target-point.wrong { fill: #dc3545; stroke: #bd2130; }
+    .river-target-point.hint-used { fill: #ffc107; stroke: #ff9800; cursor: default; }
+    .blinking {
+        animation: blink 1s infinite;
+    }
+    @keyframes blink {
+        0%, 100% { fill: #ffc107; }
+        50% { fill: #fff200; }
     }
 
-    .river-target-point.wrong {
-        fill: #dc3545;
-        stroke: #bd2130;
-    }
-
-    .river-target-point.hint-used {
-        fill: #ffc107;
-        stroke: #ff9800;
-        cursor: default;
-    }
-
+    /* Estilos juego */
     .back-to-menu-btn {
         display: block;
         width: 100%;
@@ -83,7 +82,6 @@
         margin-bottom: 20px;
     }
     .back-to-menu-btn:hover { background-color: #ddd; }
-
     .target-river-name { 
         font-weight: bold; 
         color: #333; 
@@ -95,26 +93,42 @@
         margin-top: 10px;
         margin-bottom: 20px;
     }
-
     #riverButtons button { display: none !important; }
 
-    #hintRiversList { margin-top: 5px; padding-left: 20px; }
+    /* Nombre grande sobre el mapa */
+    #bigRiverName {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 3em;
+        font-weight: bold;
+        color: rgba(0, 100, 255, 0.9);
+        text-shadow: 2px 2px 5px white;
+        opacity: 0;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+    #bigRiverName.visible {
+        opacity: 1;
+        transition: none; /* aparece de golpe */
+    }
+    #bigRiverName.fade-out {
+        opacity: 0;
+        transition: opacity 2s ease-out; /* fade out 2s */
+    }
 </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <a href="index.html" class="back-to-menu-btn">← Volver al Menú Principal</a>
+    <a href="../index.html" class="back-to-menu-btn">← Volver al Menú Principal</a>
     <h2>Juego de Ríos</h2>
     <div style="display: flex; align-items: center; margin-bottom: 10px;">
         <button id="hintButton" style="padding: 6px;">Mostrar Pista</button> 
         <span id="hintText" style="margin-left: 10px; font-weight: bold; color: red;"></span>
     </div>
-
     <div id="riverButtons"></div>
-
-    <h3>Ríos acertados con pista:</h3>
-    <ul id="hintRiversList"></ul>
 </div>
 
 <div id="mapContainer">
@@ -122,11 +136,11 @@
         <g id="backgroundLayer">
             <image href="MRelieve.png" x="0" y="0" width="800" height="800"></image>
         </g>
-
         <g id="comarcasLayer"></g>
-        <g id="riversLayer"></g> 
-        <g id="riverPointsLayer"></g> 
+        <g id="riversLayer"></g>
+        <g id="riverPointsLayer"></g>
     </svg>
+    <div id="bigRiverName"></div>
 </div>
 
 <script>
@@ -134,7 +148,6 @@ let comarcas = [];
 let rios = [];
 let answeredCorrectPermanent = new Set();
 let correctlyAnsweredInSession = new Set();
-let riversHintUsedPermanent = new Set();
 let targetRiver = null;
 let riverPointsMap = new Map();
 let riverPolylinesMap = new Map();
@@ -147,17 +160,15 @@ const riverPointsLayer = document.getElementById('riverPointsLayer');
 const riverButtonsDiv = document.getElementById('riverButtons');
 const hintButton = document.getElementById('hintButton');
 const hintText = document.getElementById('hintText');
-const hintRiversList = document.getElementById('hintRiversList');
+const bigRiverNameDiv = document.getElementById('bigRiverName');
 
 async function loadData() {
     try {
         const timestamp = new Date().getTime();
         const comarcasResponse = await fetch(`comarcas.json?t=${timestamp}`);
         comarcas = await comarcasResponse.json();
-
         const riosResponse = await fetch(`rios.json?t=${timestamp}`);    
-        const dataRios = await riosResponse.json();
-
+        dataRios = await riosResponse.json();
         rios = [];
         if (dataRios.rios) {
             dataRios.rios.forEach(r => {
@@ -175,207 +186,150 @@ async function loadData() {
 function drawMap() {
     comarcasLayer.innerHTML = "";
     if (comarcas && comarcas.comarcas) {
-        comarcas.comarcas.forEach(comarca => {
-            comarca.polygons.forEach(polygon => {
-                const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-                const pointsStr = polygon.points.map(p => `${p.x},${p.y}`).join(" ");
-                poly.setAttribute("points", pointsStr);
-                poly.setAttribute("class", "comarca");
+        comarcas.comarcas.forEach(c => {
+            c.polygons.forEach(p => {
+                const poly = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+                poly.setAttribute("points", p.points.map(pt => `${pt.x},${pt.y}`).join(" "));
+                poly.setAttribute("class","comarca");
                 comarcasLayer.appendChild(poly);
             });
         });
     }
 }
 
-function drawRiverLines() {
-    riversLayer.innerHTML = "";
-    riverPolylinesMap.clear();
-    if (!rios) return;
-    const applyOffset = (p) => `${p[0] + X_OFFSET},${p[1]}`;
-    rios.forEach(river => {
-        const riverGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
-        river.segmentos.forEach(seg => {
-            const poly = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-            const pointsStr = seg.puntos.map(applyOffset).join(" ");
-            poly.setAttribute("points", pointsStr);
-            poly.setAttribute("class", 'river'); 
-            riverGroup.appendChild(poly);
-        });
-        riversLayer.appendChild(riverGroup);
-        riverPolylinesMap.set(river.nombre, riverGroup);
-    });
-}
-
-function drawRiverPoints(reviewMode = false) {
-    riverPointsLayer.innerHTML = "";
-    riverPointsMap.clear(); 
-    rios.forEach(river => {
-        const firstSegmentPoints = river.segmentos[0].puntos;
-        const p = firstSegmentPoints[Math.floor(firstSegmentPoints.length / 2)];
-        const cx = p[0] + X_OFFSET;
-        const cy = p[1];
-
-        const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        point.setAttribute("cx", cx);
-        point.setAttribute("cy", cy);
-        point.dataset.riverName = river.nombre;
-        point.setAttribute("class", 'river-target-point');
-
-        if (!reviewMode) {
-            if (answeredCorrectPermanent.has(river.nombre)) {
-                if (riversHintUsedPermanent.has(river.nombre)) {
-                    point.classList.add('hint-used');
-                } else {
-                    point.classList.add('correct');
-                }
-                point.onclick = null;
-            } else {
-                point.onclick = (event) => checkAnswer(event.target.dataset.riverName, event.target);
-            }
-        } else {
-            point.onclick = null;
-        }
-
-        riverPointsMap.set(river.nombre, point);
-        riverPointsLayer.appendChild(point);
-    });
-    if (!reviewMode) updateHintRiversList();
-}
-
-function checkAnswer(clickedRiverName, clickedPoint) {
-    if (!targetRiver) return;
-
-    if (clickedRiverName === targetRiver.nombre) {
-        answeredCorrectPermanent.add(targetRiver.nombre);
-        correctlyAnsweredInSession.add(targetRiver.nombre);
-
-        if (hintUsedForTarget) {
-            clickedPoint.classList.add('hint-used');
-            riversHintUsedPermanent.add(targetRiver.nombre);
-            clickedPoint.dataset.hintUsed = 'true';
-            const riverGroup = riverPolylinesMap.get(targetRiver.nombre);
-            if (riverGroup) riverGroup.querySelectorAll('.river').forEach(seg => seg.classList.remove('hint-active'));
-            updateHintRiversList();
-        } else {
-            clickedPoint.classList.add('correct');
-        }
-
-        clickedPoint.classList.remove('wrong');
-        clickedPoint.onclick = null;
-
-        riverPointsMap.forEach(p => p.classList.remove('wrong'));
-
-        setTimeout(() => {
-            targetRiver = getRandomRiver();
-            hintUsedForTarget = false;
-            if (targetRiver) {
-                drawRiverPoints();
-                updateTargetDisplay();
-            }
-        }, 1000);
-    } else {
-        clickedPoint.classList.add('wrong');
-    }
-}
-
-function getRandomRiver() {
-    if (!rios) return null;
-    const unans = rios.filter(r => !answeredCorrectPermanent.has(r.nombre));
-    if (unans.length === 0) {
-        showEndGameOptions();
-        return null;
-    }
-    return unans[Math.floor(Math.random() * unans.length)];
-}
-
-function showEndGameOptions() {
-    riverButtonsDiv.innerHTML = '';
-    const congratsMsg = document.createElement('p');
-    congratsMsg.textContent = "¡Felicidades, has acertado todos los ríos!";
-    congratsMsg.style.fontWeight = 'bold';
-    riverButtonsDiv.appendChild(congratsMsg);
-
-    const restartBtn = document.createElement('button');
-    restartBtn.textContent = "Reiniciar";
-    restartBtn.className = 'btnRiver';
-    restartBtn.style.marginTop = '10px';
-    restartBtn.onclick = () => restartGame(false);
-    riverButtonsDiv.appendChild(restartBtn);
-
-    const reviewBtn = document.createElement('button');
-    reviewBtn.textContent = "Repasar";
-    reviewBtn.className = 'btnRiver';
-    reviewBtn.onclick = () => restartGame(true);
-    riverButtonsDiv.appendChild(reviewBtn);
-}
-
-function restartGame(reviewMode) {
-    if (reviewMode) {
-        answeredCorrectPermanent = new Set(correctlyAnsweredInSession);
-    } else {
-        answeredCorrectPermanent.clear();
-        riversHintUsedPermanent.clear();
-    }
-    correctlyAnsweredInSession.clear();
-    riverButtonsDiv.innerHTML = '';
-    riverPointsLayer.innerHTML = '';
-    hintText.textContent = '';
-    initializeGame(reviewMode);
-}
-
-function updateTargetDisplay() {
-    riverButtonsDiv.innerHTML = '';
-    if (!targetRiver) return;
-
-    const instruction = document.createElement('p');
-    instruction.textContent = "Haz clic en el punto del río:";
-    riverButtonsDiv.appendChild(instruction);
-
-    const targetName = document.createElement('p');
-    targetName.className = 'target-river-name';
-    targetName.textContent = targetRiver.nombre.toUpperCase();
-    riverButtonsDiv.appendChild(targetName);
-
-    const count = rios.length - answeredCorrectPermanent.size;
-    const progress = document.createElement('p');
-    progress.textContent = `Ríos restantes: ${count}`;
-    progress.style.marginTop = '10px';
-    riverButtonsDiv.appendChild(progress);
-
-    hintText.textContent = '';
-    hintButton.disabled = false;
-}
-
-function giveHint() {
-    if (!targetRiver || hintUsedForTarget) return;
-    hintText.textContent = targetRiver.nombre.toUpperCase();
-    hintUsedForTarget = true;
-
-    const riverGroup = riverPolylinesMap.get(targetRiver.nombre);
-    if (riverGroup) riverGroup.querySelectorAll('.river').forEach(seg => seg.classList.add('hint-active'));
-
-    hintButton.disabled = true;
-}
-
-function updateHintRiversList() {
-    hintRiversList.innerHTML = '';
-    riversHintUsedPermanent.forEach(name => {
-        const li = document.createElement('li');
-        li.textContent = name;
-        hintRiversList.appendChild(li);
-    });
-}
-
-function initializeGame(reviewMode = false) {
+function initializeGame() {
     drawMap();
     drawRiverLines();
     targetRiver = getRandomRiver();
     hintUsedForTarget = false;
     if (targetRiver) {
-        drawRiverPoints(reviewMode);
+        drawRiverPoints();
         updateTargetDisplay();
     }
     hintButton.onclick = giveHint;
+}
+
+function drawRiverLines() {
+    riversLayer.innerHTML = "";
+    riverPolylinesMap.clear();
+    if (!rios) return;
+    const offset = p => `${p[0]+X_OFFSET},${p[1]}`;
+    rios.forEach(r => {
+        const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+        r.segmentos.forEach(s => {
+            const poly = document.createElementNS("http://www.w3.org/2000/svg","polyline");
+            poly.setAttribute("points", s.puntos.map(offset).join(" "));
+            poly.setAttribute("class","river");
+            g.appendChild(poly);
+        });
+        riversLayer.appendChild(g);
+        riverPolylinesMap.set(r.nombre,g);
+    });
+}
+
+function drawRiverPoints() {
+    riverPointsLayer.innerHTML = "";
+    riverPointsMap.clear();
+    if (!rios) return;
+    rios.forEach(r => {
+        const pts = r.segmentos[0].puntos;
+        const p = pts[Math.floor(pts.length/2)];
+        const point = document.createElementNS("http://www.w3.org/2000/svg","circle");
+        point.setAttribute("cx", p[0]+X_OFFSET);
+        point.setAttribute("cy", p[1]);
+        point.dataset.riverName = r.nombre;
+        point.setAttribute("class","river-target-point");
+        if(answeredCorrectPermanent.has(r.nombre)){
+            if(point.dataset.hintUsed==='true') point.classList.add('hint-used');
+            else point.classList.add('correct');
+            point.onclick = null;
+        } else {
+            point.onclick = e=>checkAnswer(e.target.dataset.riverName,e.target);
+        }
+        riverPointsMap.set(r.nombre,point);
+        riverPointsLayer.appendChild(point);
+    });
+}
+
+function checkAnswer(name, point){
+    if(!targetRiver) return;
+    if(name===targetRiver.nombre){
+        answeredCorrectPermanent.add(targetRiver.nombre);
+        correctlyAnsweredInSession.add(targetRiver.nombre);
+        if(hintUsedForTarget){
+            point.classList.add('hint-used');
+            point.dataset.hintUsed='true';
+        } else point.classList.add('correct');
+        point.classList.remove('wrong');
+        point.onclick = null;
+        const g = riverPolylinesMap.get(targetRiver.nombre);
+        if(g) g.querySelectorAll('.river').forEach(poly=>{
+            poly.classList.remove('hint-active');
+            poly.classList.add('correct-river');
+        });
+        riverPointsMap.forEach(p=>p.classList.remove('wrong'));
+        setTimeout(()=>{
+            targetRiver = getRandomRiver();
+            hintUsedForTarget=false;
+            if(targetRiver){updateTargetDisplay();drawRiverPoints();}
+        },1000);
+    } else point.classList.add('wrong');
+}
+
+function getRandomRiver(){
+    if(!rios) return null;
+    const unans = rios.filter(r=>!answeredCorrectPermanent.has(r.nombre));
+    if(unans.length===0){ showEndGameOptions(); return null; }
+    return unans[Math.floor(Math.random()*unans.length)];
+}
+
+function showEndGameOptions(){
+    riverButtonsDiv.innerHTML = '';
+    const msg=document.createElement('p');
+    msg.textContent="¡Felicidades, has acertado todos los ríos!";
+    msg.style.fontWeight='bold';
+    riverButtonsDiv.appendChild(msg);
+    const restart=document.createElement('button');
+    restart.textContent="Reiniciar"; restart.onclick=()=>restartGame(false);
+    riverButtonsDiv.appendChild(restart);
+    const review=document.createElement('button');
+    review.textContent="Repasar"; review.onclick=()=>restartGame(true);
+    riverButtonsDiv.appendChild(review);
+}
+
+function restartGame(review){
+    if(review) answeredCorrectPermanent=new Set(correctlyAnsweredInSession);
+    else answeredCorrectPermanent.clear();
+    correctlyAnsweredInSession.clear();
+    riverButtonsDiv.innerHTML='';
+    riverPointsLayer.innerHTML='';
+    hintText.textContent='';
+    initializeGame();
+}
+
+function updateTargetDisplay(){
+    riverButtonsDiv.innerHTML='';
+    if(!targetRiver) return;
+    const p1=document.createElement('p'); p1.textContent="Haz clic en el punto del río:"; riverButtonsDiv.appendChild(p1);
+    const targetName=document.createElement('p'); targetName.className='target-river-name'; targetName.textContent=targetRiver.nombre.toUpperCase(); riverButtonsDiv.appendChild(targetName);
+    const count=rios.length-answeredCorrectPermanent.size;
+    const p2=document.createElement('p'); p2.textContent=`Ríos restantes: ${count}`; riverButtonsDiv.appendChild(p2);
+    hintText.textContent='';
+
+    // Nombre grande sobre mapa: aparece de golpe, espera 0.5s y se desvanece 2s
+    bigRiverNameDiv.textContent=targetRiver.nombre.toUpperCase();
+    bigRiverNameDiv.className='visible';
+    setTimeout(()=>{ bigRiverNameDiv.className='fade-out'; },500);
+}
+
+function giveHint(){
+    if(!targetRiver || hintUsedForTarget) return;
+    hintText.textContent=targetRiver.nombre.toUpperCase();
+    hintUsedForTarget=true;
+    const g = riverPolylinesMap.get(targetRiver.nombre);
+    if(g) g.querySelectorAll('.river').forEach(poly=>poly.classList.add('hint-active'));
+    const point = riverPointsMap.get(targetRiver.nombre);
+    if(point) point.classList.add('blinking');
 }
 
 loadData();
